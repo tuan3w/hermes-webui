@@ -2,52 +2,26 @@
 
 ## [Unreleased]
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+## [v0.51.90] — 2026-05-18 — Release BN (stage-383 — 10-PR full sweep batch — empty-gateway messaging history fix + previous-messaging-sessions setting + Kanban board switcher layout + UI/UX demo theme controls + Slice 3c queue/goal RFC gate + keyless custom endpoints + custom-provider remote model catalog parity + auto-compression elapsed timer + new-conversation cold-start guard + Kanban drag-drop detail open fix)
+
 ### Fixed
 
-- Board selector menu labels no longer overlap board titles when board metadata uses a longer text label in the icon/color slot.
-=======
+- **PR #2286** by @junjunjunbong (refs #2275) — Narrow messaging stale-session filtering to active gateway sessions that are visible in the current sidebar candidate set. Older Discord/messaging history is now preserved when the gateway advertises a fresh zero-message session that hasn't yet entered the visible projection, instead of being hidden as stale. Adds a regression test for an empty active Discord gateway row preserving prior history.
+- **PR #2459** by @franksong2702 (closes #2458) — Fix the Kanban board switcher menu when a board's icon slot carries a long text label (e.g. `layout-kanban`). The icon column changed from a fixed `18px` slot to a bounded flex cell with `min-width:18px;max-width:7.5rem`, with overflow ellipsis on the icon itself so long labels render fully when space allows and truncate cleanly when not. Title and count columns keep stable spacing. Adds before/after screenshots and a CSS contract regression in `tests/test_kanban_ui_static.py`.
+- **PR #2522** by @Michaelyklam (refs #2271) — Treat named custom OpenAI-compatible endpoints with a configured `base_url` as key-optional at WebUI agent startup. Local keyless servers (llama-server / vLLM-style LAN deployments) no longer fail early with a synthetic `CUSTOM:<slug>_API_KEY` env-var prompt before the request reaches the endpoint; instead the OpenAI-compatible client initialises with a harmless placeholder key and real configured keys are still preferred when present. Refactors the three near-identical custom-provider rebuild blocks (initial agent setup + two retry/healing paths) through the existing `resolve_custom_provider_connection` helper.
+- **PR #2515** by @Michaelyklam (closes #2513) — Keep named custom-provider model pickers populated from each configured endpoint's live `/models` catalog even when `custom_providers[].model` is present. The singular `model` field now acts as a sticky/fallback entry appended *after* the remote catalog rather than collapsing the picker to just the configured model and hiding sibling named custom providers. Extracts reusable OpenAI-compatible `/models` parsing/fetching helpers and threads them through both the active-base-url and per-named-provider paths.
+- **PR #2512** by @dso2ng (refs #2477, Slice A) — Show an elapsed timer on the running automatic-compression card so long WebUI context-compression pauses no longer look frozen while the browser waits for the `compressed` event. Stamps `startedAt` on the `compressing` SSE event, ticks once per second, and switches to a `5+ min` cap label past the Slice A bound so the UI never frame-freezes at `05:00`. Browser-transient state only — no SSE contract change and no server-side resume reconstruction.
+- **PR #2528** by @Michaelyklam (closes #2518) — Guard New Conversation creation while a previous `/api/session/new` request is still in flight, so cold model/provider catalog resolution gives immediate pending feedback and rapid repeated clicks reuse the same create request instead of enqueueing duplicate blank sessions. Coalesces concurrent `newSession()` calls behind a single in-flight promise, disables the sidebar button with `aria-busy="true"`, and shows a localized `Creating new conversation…` composer status.
+- **PR #2530** by @franksong2702 (refs #2529) — Keep Kanban drag/drop status updates from also opening the task detail pane. Two failure paths were both producing detail-pane opens after drag/drop: the browser's trailing synthetic click after `drop`, and the generic task-update helper opening detail on every PATCH. The fix adds a time-windowed `_kanbanSuppressCardClickUntil` set on `ondragstart`/`ondragend`/`ondrop` and routes drag/drop status changes through a board-only update path. Explicit card click and keyboard activation remain unchanged.
+
+### Added
+
+- **PR #2294** by @junjunjunbong — Add a `show_previous_messaging_sessions` setting so users can opt back into seeing previous messaging sessions that were replaced by `session_reset` or auto-compression. The preference is wired through boot, settings persistence, and the sidebar projection. Also adds a separate "Hide from list" action for imported messaging/CLI sessions that hides individual rows from the sidebar without deleting source history.
+
 ### Documentation
 
-- Align the `docs/ui-ux/` demo appearance controls with the current Theme + Skin
-  model, replacing the stale `data-theme`-only buttons and legacy theme names.
->>>>>>> pr-2511
-=======
-### Documentation
-
-- **PR #TBD** by @Michaelyklam (refs #1925) — Advance the runtime-adapter RFC after the Slice 3b approval/clarify seam shipped in v0.51.89. The RFC now marks Slice 3b as shipped and defines the next Slice 3c queue/continue + goal control gate: route those controls through `RuntimeAdapter.queue_message(...)` / `update_goal(...)` only after pinning stable response contracts, bounded unavailable-control behavior, replayable lifecycle/status evidence, ordering/idempotency expectations, and explicit non-goals for runner/sidecar ownership or a WebUI-owned queue/goal scheduler.
->>>>>>> pr-2509
-=======
-### Fixed
-
-- Treat named custom OpenAI-compatible endpoints with a configured `base_url` as key-optional at WebUI agent startup, so local keyless servers do not fail early with a synthetic `CUSTOM:<slug>_API_KEY` prompt before the request reaches the endpoint.
->>>>>>> pr-2522
-=======
-### Fixed
-
-- **PR #2515** (closes #2513) — Keep named custom-provider model pickers populated from each configured endpoint even when `custom_providers[].model` is present. The singular `model` field now acts as a sticky/fallback entry instead of preventing remote `/models` catalog entries or sibling custom providers from appearing.
->>>>>>> pr-2515
-=======
-### Fixed
-
-- Show an elapsed timer on the running automatic-compression card so long WebUI context-compression pauses no longer look frozen while the browser waits for the `compressed` event.
->>>>>>> pr-2512
-=======
-### Fixed
-
-- **PR #2528** (closes #2518) — Guard New Conversation creation while a previous `/api/session/new` request is still in flight, so cold model/provider catalog resolution gives immediate pending feedback and rapid repeated clicks reuse the same create request instead of enqueueing duplicate blank sessions.
->>>>>>> pr-2528
-=======
-### Fixed
-
-- Keep Kanban drag/drop status updates from also opening the task detail pane via a trailing card click or the generic task-update helper (refs #2529).
->>>>>>> pr-2530
+- **PR #2511** by @franksong2702 (refs #2502 / #2503) — Update the `docs/ui-ux/` demo appearance controls to initialize as `class="dark" data-skin="slate"` instead of the deprecated `data-theme`-only buttons and legacy theme names. Brings the demo pages in line with the live Theme + Skin contract referenced from the new `docs/CONTRACTS.md` so contributors following the contract-index path don't land on stale demos.
+- **PR #2509** by @Michaelyklam (refs #1925) — Advance the runtime-adapter RFC after the Slice 3b approval/clarify seam shipped in v0.51.89. The RFC now marks Slice 3b as shipped and defines the next Slice 3c queue/continue + goal control gate: route those controls through `RuntimeAdapter.queue_message(...)` / `update_goal(...)` only after pinning stable response contracts, bounded unavailable-control behavior, replayable lifecycle/status evidence, ordering/idempotency expectations, and explicit non-goals for runner/sidecar ownership or a WebUI-owned queue/goal scheduler. Docs + adapter-seam regression test only — no runtime/control routing changes in this PR.
 
 ## [v0.51.89] — 2026-05-18 — Release BM (stage-382 — 6-PR full sweep batch — runtime adapter approval/clarify seam + SOUL.md memory panel + #1855 resolve_model_provider fast-path + PWA sidebar spinner fix + /model active-provider preference + contributor contract docs index)
 
