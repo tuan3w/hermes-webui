@@ -19,6 +19,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
+from api.session_events import publish_session_list_changed
+
 logger = logging.getLogger(__name__)
 
 # ── Constants (match hermes_cli.profiles upstream) ─────────────────────────
@@ -411,8 +413,11 @@ def install_cron_scheduler_profile_isolation() -> None:
         # the explicitly selected manual execution profile.
         if _cron_profile_context_depth() > 0:
             return original(job, *args, **kwargs)
-        with cron_profile_context_for_home(_home_for_scheduled_cron_job(job)):
-            return original(job, *args, **kwargs)
+        try:
+            with cron_profile_context_for_home(_home_for_scheduled_cron_job(job)):
+                return original(job, *args, **kwargs)
+        finally:
+            publish_session_list_changed("cron_complete")
 
     _webui_profile_isolated_run_job._webui_profile_isolated = True
     _webui_profile_isolated_run_job._webui_original_run_job = original

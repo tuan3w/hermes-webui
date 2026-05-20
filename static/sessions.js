@@ -2069,6 +2069,7 @@ function _applySessionListPayload(sessData, projData){
     animateNextSessionListRefresh({enterAll:true});
     _sessionListFirstRenderAnimated=true;
   }
+  ensureSessionEventsSSE();
   renderSessionListFromCache();  // no-ops if rename is in progress
 }
 
@@ -2107,6 +2108,12 @@ let _streamingPollTimer = null;
 let _sessionTimeRefreshTimer = null;
 let _activeSessionExternalRefreshTimer = null;
 let _activeSessionExternalRefreshInFlight = false;
+let _sessionEventsSSE = null;
+let _sessionEventsRefreshTimer = 0;
+let _sessionEventsReconnectTimer = 0;
+let _sessionEventsNeedsRefreshOnOpen = false;
+let _sessionListRefreshInFlight = false;
+let _sessionListRefreshPendingReason = '';
 
 function startStreamingPoll(){
   if(_streamingPollTimer) return;
@@ -2171,6 +2178,83 @@ function ensureActiveSessionExternalRefreshPoll(){
     window._hermesExternalRefreshFocusHook = true;
   }
 }
+
+async function refreshSessionList(reason='manual', opts={}){
+  const force = !!(opts && opts.force);
+  const refreshActive = !!(opts && opts.refreshActive);
+  if(!force && typeof document !== 'undefined' && document.hidden) return;
+  if(_sessionListRefreshInFlight){
+    _sessionListRefreshPendingReason = reason || 'session-list';
+    return;
+  }
+  _sessionListRefreshInFlight = true;
+  try{
+    await renderSessionList({deferWhileInteracting:!force});
+    if(refreshActive) await refreshActiveSessionIfExternallyUpdated(reason||'session-list');
+  }finally{
+    _sessionListRefreshInFlight = false;
+    const pendingReason = _sessionListRefreshPendingReason;
+    _sessionListRefreshPendingReason = '';
+    if(pendingReason) _scheduleSessionEventsRefresh(pendingReason);
+  }
+}
+
+function _scheduleSessionEventsRefresh(reason){
+  if(_sessionEventsRefreshTimer) return;
+  _sessionEventsRefreshTimer = setTimeout(() => {
+    _sessionEventsRefreshTimer = 0;
+    void refreshSessionList(reason||'event');
+  }, 300);
+}
+
+function _closeSessionEventsSSE(){
+  if(_sessionEventsSSE){
+    _sessionEventsSSE.close();
+    _sessionEventsSSE = null;
+  }
+}
+
+function ensureSessionEventsSSE(){
+  if(typeof document !== 'undefined' && !document._hermesSessionEventsVisibilityHook){
+    document.addEventListener('visibilitychange', () => {
+      if(document.hidden){
+        _closeSessionEventsSSE();
+      }else{
+        ensureSessionEventsSSE();
+        void refreshSessionList('visible');
+      }
+    });
+    document._hermesSessionEventsVisibilityHook = true;
+  }
+  if(typeof EventSource==='undefined') return;
+  if(typeof document !== 'undefined' && document.hidden) return;
+  if(_sessionEventsSSE) return;
+  try{
+    // Same-origin relative URL preserves subpath mounts and normal WebUI cookies.
+    _sessionEventsSSE = new EventSource('api/sessions/events');
+    _sessionEventsSSE.onopen = () => {
+      if(!_sessionEventsNeedsRefreshOnOpen) return;
+      _sessionEventsNeedsRefreshOnOpen = false;
+      void refreshSessionList('reconnect');
+    };
+    _sessionEventsSSE.addEventListener('sessions_changed', () => {
+      _scheduleSessionEventsRefresh('event');
+    });
+    _sessionEventsSSE.onerror = () => {
+      _sessionEventsNeedsRefreshOnOpen = true;
+      _closeSessionEventsSSE();
+      if(_sessionEventsReconnectTimer) return;
+      _sessionEventsReconnectTimer = setTimeout(() => {
+        _sessionEventsReconnectTimer = 0;
+        ensureSessionEventsSSE();
+      }, 5000);
+    };
+  }catch(e){
+    _closeSessionEventsSSE();
+  }
+}
+
+if(typeof window!=='undefined') window.refreshSessionList = refreshSessionList;
 
 function startGatewayPollFallback(ms){
   const intervalMs = Math.max(5000, Number(ms) || _gatewayFallbackPollMs);
