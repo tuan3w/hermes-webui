@@ -109,6 +109,51 @@ class TestGenerateTitleRawViaAuxTimeout(unittest.TestCase):
             30.0,
         )
 
+    def test_configured_provider_model_and_base_url_are_passed_to_aux_client(self):
+        """Regression for #2235: task config must select the first title model.
+
+        If generate_title_raw_via_aux leaves provider/model/base_url as None,
+        agent.auxiliary_client.call_llm can fall back to the main chat model and
+        WebUI titles look like local first-message placeholders or unrelated
+        chat-model output instead of using auxiliary.title_generation.model.
+        """
+        from api.streaming import generate_title_raw_via_aux
+
+        mock_resp = types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    message=types.SimpleNamespace(content='Configured Model Title'),
+                    finish_reason='stop',
+                )
+            ]
+        )
+        captured = {}
+
+        def fake_call_llm(**kwargs):
+            captured.update(kwargs)
+            return mock_resp
+
+        tg_config = {
+            'provider': 'openrouter',
+            'model': 'anthropic/claude-haiku-title',
+            'base_url': 'https://openrouter.ai/api/v1',
+            'timeout': 22.0,
+        }
+        with _patch_tg_config(tg_config):
+            with patch('agent.auxiliary_client.call_llm', side_effect=fake_call_llm, create=True):
+                result, status = generate_title_raw_via_aux(
+                    user_text='Explain why the moon has phases.',
+                    assistant_text='The moon has phases because we see different sunlit portions.',
+                )
+
+        self.assertEqual(result, 'Configured Model Title')
+        self.assertEqual(status, 'llm_aux')
+        self.assertEqual(captured.get('task'), 'title_generation')
+        self.assertEqual(captured.get('provider'), 'openrouter')
+        self.assertEqual(captured.get('model'), 'anthropic/claude-haiku-title')
+        self.assertEqual(captured.get('base_url'), 'https://openrouter.ai/api/v1')
+        self.assertEqual(captured.get('timeout'), 22.0)
+
     def test_integer_timeout_from_config(self):
         """Config timeout as int is coerced to float."""
         self._run_with_config(

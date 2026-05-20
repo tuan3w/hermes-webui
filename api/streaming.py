@@ -1209,17 +1209,23 @@ def _is_minimax_route(provider: str = '', model: str = '', base_url: str = '') -
     return 'minimax' in text or 'minimaxi.com' in text
 
 
-def _aux_title_configured() -> bool:
-    """Return True when any auxiliary title_generation config field is meaningfully set."""
+def _get_aux_title_config() -> dict:
+    """Return title_generation auxiliary config, or an empty dict on errors."""
     try:
         from agent.auxiliary_client import _get_auxiliary_task_config
         tg = _get_auxiliary_task_config('title_generation')
-        provider = tg.get('provider', '') or ''
-        model = tg.get('model', '') or ''
-        base_url = tg.get('base_url', '') or ''
-        return bool(model or base_url or (provider and provider.lower() != 'auto'))
+        return tg if isinstance(tg, dict) else {}
     except Exception:
-        return False
+        return {}
+
+
+def _aux_title_configured() -> bool:
+    """Return True when any auxiliary title_generation config field is meaningfully set."""
+    tg = _get_aux_title_config()
+    provider = tg.get('provider', '') or ''
+    model = tg.get('model', '') or ''
+    base_url = tg.get('base_url', '') or ''
+    return bool(model or base_url or (provider and provider.lower() != 'auto'))
 
 def _aux_title_timeout(default: float = 15.0) -> float:
     """Return the configured timeout (seconds) for auxiliary title generation.
@@ -1229,8 +1235,7 @@ def _aux_title_timeout(default: float = 15.0) -> float:
     so mis-configurations are visible in server output.
     """
     try:
-        from agent.auxiliary_client import _get_auxiliary_task_config
-        tg = _get_auxiliary_task_config('title_generation')
+        tg = _get_aux_title_config()
         raw = tg.get('timeout')
         if raw is None:
             return default
@@ -1363,6 +1368,12 @@ def generate_title_raw_via_aux(
     if not user_text or not assistant_text:
         return None, 'missing_exchange'
     qa, prompts = _title_prompts(user_text, assistant_text)
+    configured = _get_aux_title_config()
+    provider = provider or configured.get('provider', '') or ''
+    if str(provider).strip().lower() == 'auto':
+        provider = ''
+    model = model or configured.get('model', '') or ''
+    base_url = base_url or configured.get('base_url', '') or ''
     base_max_tokens = _title_completion_budget(provider, model, base_url)
     reasoning_extra = {"reasoning": {"enabled": False}}
     if _is_minimax_route(provider, model, base_url):

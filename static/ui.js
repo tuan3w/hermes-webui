@@ -915,6 +915,9 @@ async function populateModelDropdown(){
     // Per-page-load — not synced across browser tabs.
     window._defaultModel=data.default_model||null;
     window._configuredModelBadges=data.configured_model_badges||{};
+    // Keep the g.extra_models label hydration path below in this function; tests
+    // assert populateModelDropdown preserves that full-catalog label contract.
+    window._modelEndpointErrors={};
 
     const _synthGroupsFromConfigured=()=>{
       const badgeMap=window._configuredModelBadges||{};
@@ -964,6 +967,11 @@ async function populateModelDropdown(){
       const og=document.createElement('optgroup');
       og.label=g.provider;
       if(g.provider_id) og.dataset.provider=g.provider_id;
+      if(g.models_endpoint_error){
+        const errorKey=g.provider_id||g.provider||'';
+        og.dataset.modelsEndpointError=JSON.stringify(g.models_endpoint_error);
+        if(errorKey) window._modelEndpointErrors[errorKey]=g.models_endpoint_error;
+      }
       for(const m of (Array.isArray(g.models)?g.models:[])){
         const opt=document.createElement('option');
         opt.value=m.id;
@@ -1218,12 +1226,19 @@ function renderModelDropdown(){
   for(const child of Array.from(sel.children)){
     if(child.tagName==='OPTGROUP'){
       const providerId=child.dataset&&child.dataset.provider?child.dataset.provider:'';
+      let modelsEndpointError=null;
+      if(child.dataset&&child.dataset.modelsEndpointError){
+        try{ modelsEndpointError=JSON.parse(child.dataset.modelsEndpointError); }catch(_e){ modelsEndpointError=null; }
+      }
       for(const opt of Array.from(child.children)){
         const rawValue=String(opt.value||'');
         const displayName=rawValue.startsWith('@custom:')
           ? getModelLabel(rawValue)
           : (opt.textContent||getModelLabel(rawValue));
-        _modelData.push({value:opt.value,name:esc(displayName),id:esc(opt.value),group:child.label||'',badge:_getConfiguredModelBadge(opt.value,_badgeMap,providerId)});
+        _modelData.push({value:opt.value,name:esc(displayName),id:esc(opt.value),group:child.label||'',providerId,modelsEndpointError,badge:_getConfiguredModelBadge(opt.value,_badgeMap,providerId)});
+      }
+      if(modelsEndpointError && !child.children.length){
+        _modelData.push({value:`__models_endpoint_error__:${providerId||child.label||''}`,name:'',id:'',group:child.label||'',providerId,modelsEndpointError,endpointErrorOnly:true});
       }
     }
     if(child.tagName==='OPTION'){
@@ -1362,8 +1377,17 @@ function renderModelDropdown(){
     const _groupCounts={};
     for(const m of _modelData){
       if(configuredIds.has(m.value)) continue;
-      if(m.group) _groupCounts[m.group]=(_groupCounts[m.group]||0)+1;
+      if(m.group&&!m.endpointErrorOnly) _groupCounts[m.group]=(_groupCounts[m.group]||0)+1;
     }
+    const _renderProviderEndpointHint=(groupName)=>{
+      if(!groupName) return;
+      const entry=_modelData.find(m=>m.group===groupName&&m.modelsEndpointError);
+      if(!entry||!entry.modelsEndpointError) return;
+      const hint=document.createElement('div');
+      hint.className='model-provider-hint';
+      hint.textContent=entry.modelsEndpointError.message||'Models endpoint could not be reached for this provider.';
+      dd.appendChild(hint);
+    };
     for(const m of _modelData){
       if(configuredIds.has(m.value)||!matches(m)) continue;
       if(m.group&&m.group!==_lastGroup){
@@ -1372,8 +1396,10 @@ function renderModelDropdown(){
         const count=_groupCounts[m.group]||0;
         heading.textContent=count>1?`${m.group} (${count})`:m.group;
         dd.appendChild(heading);
+        _renderProviderEndpointHint(m.group);
         _lastGroup=m.group;
       }
+      if(m.endpointErrorOnly) continue;
       const row=document.createElement('div');
       row.className='model-opt'+(m.value===sel.value?' active':'');
       const badgeHtml=m.badge?`<span class="model-opt-badge model-opt-badge--${esc(m.badge.role||'configured')}">${esc(m.badge.label||'Configured')}</span>`:'';

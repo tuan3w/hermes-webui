@@ -404,8 +404,23 @@ def test_rfc_defines_slice4_runner_contract_before_runner_code():
     assert "no removal of the legacy in-process backend" in rfc
     assert "no default-on runner mode" in rfc
     assert "#### Slice 4b: Runner adapter client facade" in rfc
+    assert "Status as of 2026-05-20: shipped in v0.51.94 via #2599" in rfc
     assert "delegates to an injected runner client" in rfc
     assert "without relying on process-local `STREAMS`" in rfc
+
+
+def test_rfc_defines_slice4c_runner_backend_harness_gate():
+    routes = importlib.import_module("api.routes")
+    rfc = (routes.Path(__file__).parent.parent / "docs" / "rfcs" / "hermes-run-adapter-contract.md").read_text(encoding="utf-8")
+
+    assert "#### Slice 4c: Feature-flagged runner backend and restart/reattach harness" in rfc
+    assert "`HERMES_WEBUI_RUNTIME_ADAPTER=runner-local`" in rfc
+    assert "`legacy-direct` remains the default" in rfc
+    assert "No route-shape drift" in rfc
+    assert "Restart/reattach harness" in rfc
+    assert "discard the first WebUI adapter instance" in rfc
+    assert "No runtime-surrogate globals" in rfc
+    assert "no live chat route switch to the runner backend before the restart/reattach" in rfc
 
 
 def test_runner_runtime_adapter_passes_explicit_start_payload_without_env_mutation(monkeypatch):

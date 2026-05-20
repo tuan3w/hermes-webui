@@ -5631,9 +5631,46 @@ def handle_post(handler, parsed) -> bool:
             s = _ensure_full_session_before_mutation(body["session_id"], s)
         except KeyError:
             return bad(handler, "Session not found", 404)
-        with _get_session_agent_lock(body["session_id"]):
-            s.pinned = bool(body.get("pinned", True))
-            s.save()
+        pin_requested = bool(body.get("pinned", True))
+        # TOCTOU guard (Opus stage-389): the count check and the pin write
+        # must happen under the same lock, otherwise two parallel pin
+        # requests can both pass `len(pinned_ids) >= 3` against the same
+        # snapshot and both succeed, leaving the user with 4 pins. The check
+        # must be careful not to nest `all_sessions()` (which acquires LOCK
+        # internally) inside a `with LOCK:` block — that's a deadlock since
+        # LOCK is a non-reentrant `threading.Lock`. We snapshot the
+        # persisted index outside the lock, then re-check the in-memory
+        # mutation set inside the lock and commit the pin atomically.
+        if pin_requested and not getattr(s, "pinned", False):
+            # Pre-snapshot from persisted index (acquires LOCK internally,
+            # so must run outside our own LOCK acquire below).
+            persisted_pinned_ids = {
+                getattr(existing, "session_id", None) for existing in all_sessions()
+                if getattr(existing, "pinned", False) and not getattr(existing, "archived", False)
+            }
+            with LOCK:
+                # Final authoritative count: merge persisted-pinned with the
+                # in-memory SESSIONS snapshot. SESSIONS may have pin mutations
+                # that haven't yet flushed to the index, so the in-memory side
+                # is the truth for in-flight contention.
+                pinned_ids = set(persisted_pinned_ids)
+                pinned_ids.update(
+                    sid for sid, existing in SESSIONS.items()
+                    if getattr(existing, "pinned", False) and not getattr(existing, "archived", False)
+                )
+                pinned_ids.discard(body["session_id"])
+                if len(pinned_ids) >= 3:
+                    return bad(handler, "Up to 3 sessions can be pinned. Unpin one before pinning another.", 400)
+                # Mark in-memory pin state under LOCK so concurrent pin
+                # requests see the increment immediately, even before
+                # save() finishes flushing to disk.
+                s.pinned = True
+            with _get_session_agent_lock(body["session_id"]):
+                s.save()
+        else:
+            with _get_session_agent_lock(body["session_id"]):
+                s.pinned = pin_requested
+                s.save()
         return j(handler, {"ok": True, "session": s.compact()})
 
     # ── Session archive (POST) ──

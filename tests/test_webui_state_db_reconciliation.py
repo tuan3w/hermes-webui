@@ -161,6 +161,31 @@ def test_metadata_poll_uses_sidecar_message_count_for_external_updates(monkeypat
     assert session["last_message_at"] == 1001.0
 
 
+def test_metadata_poll_prefers_sidecar_count_when_index_is_stale(monkeypatch, tmp_path):
+    """A stale sidebar index must not hide externally appended sidecar turns."""
+    import api.config as config
+    import api.routes as routes
+
+    sid = "webui_reconcile_metadata_stale_index"
+    sidecar_messages = [
+        {"role": "user", "content": "before stale index", "timestamp": 1000.0},
+        {"role": "assistant", "content": "new sidecar turn", "timestamp": 1001.0},
+    ]
+    _install_test_session(monkeypatch, tmp_path, sid, sidecar_messages)
+    config.SESSION_INDEX_FILE.write_text(
+        json.dumps([{"session_id": sid, "message_count": 1}]),
+        encoding="utf-8",
+    )
+
+    handler = _GetHandler(f"/api/session?session_id={sid}&messages=0&resolve_model=0")
+    routes.handle_get(handler, urlparse(handler.path))
+
+    assert handler.status == 200
+    session = handler.response_json["session"]
+    assert session["message_count"] == 2
+    assert session["last_message_at"] == 1001.0
+
+
 def test_state_db_reconciliation_preserves_sidecar_only_messages(monkeypatch, tmp_path):
     import api.routes as routes
 

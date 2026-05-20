@@ -358,6 +358,16 @@ def _lookup_index_message_count(session_id):
     return None
 
 
+def _parse_nonnegative_int(value):
+    if isinstance(value, int) and value >= 0:
+        return value
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
 class Session:
     def __init__(self, session_id: str=None, title: str='Untitled',
                  workspace=str(DEFAULT_WORKSPACE), model=DEFAULT_MODEL,
@@ -620,19 +630,16 @@ class Session:
             parsed['messages'] = []
             parsed['tool_calls'] = []
             session = cls(**parsed)
-            metadata_message_count = _lookup_index_message_count(sid)
-            if metadata_message_count is None:
-                raw_count = parsed.get('message_count')
-                if isinstance(raw_count, int) and raw_count >= 0:
-                    metadata_message_count = raw_count
-                else:
-                    try:
-                        parsed_count = int(raw_count)
-                    except (TypeError, ValueError):
-                        parsed_count = None
-                    if parsed_count is not None and parsed_count >= 0:
-                        metadata_message_count = parsed_count
-            session._metadata_message_count = metadata_message_count
+            index_message_count = _lookup_index_message_count(sid)
+            sidecar_message_count = _parse_nonnegative_int(parsed.get('message_count'))
+            # The sidebar index is a cache and can lag behind external sidecar
+            # appends/backfills. Prefer the largest known count so metadata-only
+            # active-session polls do not miss real remote updates.
+            known_counts = [
+                count for count in (index_message_count, sidecar_message_count)
+                if count is not None
+            ]
+            session._metadata_message_count = max(known_counts) if known_counts else None
             # Mark this session as a metadata-only stub. save() refuses to write
             # such a session because doing so would atomically replace the
             # on-disk JSON with messages=[], wiping the conversation. Any
@@ -2495,9 +2502,10 @@ def _normalized_message_timestamp_for_key(value):
         timestamp = float(value)
     except (TypeError, ValueError):
         return str(value)
-    if timestamp.is_integer():
-        return str(int(timestamp))
-    return ("%.6f" % timestamp).rstrip("0").rstrip(".")
+    # Truncate to second-level granularity so that sub-second drift between
+    # the sidecar JSON write and the state.db created_at write does not cause
+    # the legacy dedup key to differ for the same logical message.
+    return str(int(timestamp))
 
 
 def _message_timestamp_as_float(msg):

@@ -1,7 +1,27 @@
+---
 # Hermes Web UI -- Changelog
 
 ## [Unreleased]
 
+
+## [v0.51.96] — 2026-05-20 — Release BT (stage-389 — 8-PR batch — IPv6 dashboard link normalization + configured title-generation provider routing + sidebar pinned-session 3-cap + external-refresh sidecar count preference + Hermes overview docs relocation + legacy dedup timestamp granularity + custom provider /models endpoint error surfacing + RuntimeAdapter Slice 4c harness gate RFC)
+
+### Fixed
+
+- **PR #2610** by @AJV20 — Preserve square brackets around IPv6 hosts when normalizing browser-only dashboard URLs, so links like `http://[::1]:9119` remain valid after saving instead of being mangled into invalid IPv6 forms. Closes the regression introduced by the URL-sanitization path added in #2533 / v0.51.95 — bracketed IPv6 hosts now round-trip through the dashboard-link save flow unchanged.
+- **PR #2612** by @AJV20 — Route WebUI session title generation through the configured `auxiliary.title_generation` provider, model, and base URL when present in config, instead of leaving the auxiliary client to silently fall back to the chat model. Users who configure a smaller/cheaper model for title generation (e.g. a fast 8B model on a separate provider) now have that selection honored end-to-end.
+- **PR #2618** by @LumenYoung — Prefer the persisted sidecar `message_count` over the session-index stored count during external-refresh polling. The metadata-only `/api/session?messages=0` path now reads `Session._metadata_message_count` when sidecar data is available, so legacy sessions whose state.db retains old rows still trip the external-refresh signal correctly on sidecar updates. Composes cleanly with #2604 (the legacy-fallback only applies when the reconciled merged count is zero).
+- **PR #2620** by @bengdan — Use second-level timestamp granularity in the legacy message-dedup key. Drops the microsecond fallback in `_normalized_message_timestamp_for_dedup_key()` so transcripts that encode timestamps at different sub-second precisions (e.g. `"10.0"` vs `10.000000`) collapse to the same dedup bucket. Retroactively de-duplicates the dominant failure mode in #2616 without requiring an on-disk session rewrite.
+- **PR #2626** by @Michaelyklam (closes #2540) — Surface named custom-provider `/models` endpoint failures in the model picker instead of silently showing an empty provider group. `_read_custom_endpoint_models` now returns `(models, error)`, so auth/network/HTTP failures propagate as structured `models_endpoint_error` hints on `/api/models` per affected provider. The composer model picker renders the hint as a quiet disabled-option diagnostic; configured fallback models remain selectable. 124 LOC of new regression coverage spans 401/network-error/5xx failure modes plus frontend hook validation.
+
+### Added
+
+- **PR #2614** by @Michaelyklam (refs #2508) — Cap sidebar-active pinned sessions at three. Right-clicking a conversation row opens the existing action menu, attempted pins beyond the cap render the menu item as disabled with an explanatory tooltip, and the backend rejects a fourth pin attempt with a structured error so the optimistic frontend can roll back the click. Settles the open question from #2508 on whether pin count is bounded — the answer is three, configurable in a future PR if user demand surfaces.
+
+### Documentation
+
+- **PR #2619** by @Michaelyklam (closes #2595) — Move the long human-facing Hermes comparison document from root `HERMES.md` to `docs/why-hermes.md` so Hermes Agent sessions opened in this repository load `AGENTS.md` as the project-specific assistant guidance instead of the marketing overview. README links now point to the new docs path and a regression test (`tests/test_agent_context_docs.py`) prevents root `HERMES.md` / `.hermes.md` context files from silently reappearing.
+- **PR #2627** by @Michaelyklam (refs #1925) — Advance the RuntimeAdapter RFC after the Slice 4b `RunnerRuntimeAdapter` facade shipped in v0.51.94. The RFC now defines the next Slice 4c runner-backend harness gate: feature-flagged runner backend selection, explicit start payload validation, durable status/event observation across WebUI adapter recreation, bounded controls, and a deterministic harness for proving the facade's protocol-translation invariants without requiring the future runner/sidecar to exist.
 
 ## [v0.51.95] — 2026-05-20 — Release BS (stage-388 — 5-PR batch — live tool callback event dedup + browser-only dashboard links + messaging transcript merge alignment + Geist Contrast skin + SSE runtime diagnostics)
 
