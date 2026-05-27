@@ -269,10 +269,50 @@ def hermes_command_exists() -> bool:
     return shutil.which("hermes") is not None
 
 
+def _ensure_uv() -> str:
+    """Return path to uv, installing it if necessary."""
+    uv = shutil.which("uv")
+    if uv:
+        return uv
+    # Check common install locations that may not be on PATH in a desktop launch
+    home = Path.home()
+    candidates = [
+        home / ".local" / "bin" / "uv",
+        home / ".cargo" / "bin" / "uv",
+    ]
+    if platform.system() == "Windows":
+        candidates += [
+            home / ".local" / "bin" / "uv.exe",
+            Path(os.environ.get("APPDATA", "")) / "uv" / "bin" / "uv.exe",
+        ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    info("uv not found — installing uv...")
+    if platform.system() == "Windows":
+        subprocess.run(
+            ["powershell", "-ExecutionPolicy", "ByPass", "-c",
+             "irm https://astral.sh/uv/install.ps1 | iex"],
+            check=True,
+        )
+    else:
+        subprocess.run(
+            ["sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"],
+            check=True,
+        )
+    # After install, the binary lands in ~/.local/bin or ~/.cargo/bin
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return shutil.which("uv") or "uv"
+
+
 def install_hermes_agent() -> None:
-    info(f"Hermes Agent not found. Attempting install via {INSTALLER_URL}")
+    uv = _ensure_uv()
+    info(f"Hermes Agent not found. Installing via: uv tool install git+https://github.com/tuan3w/hermes-agent@main")
     subprocess.run(
-        ["/bin/bash", "-lc", f"curl -fsSL {INSTALLER_URL} | bash"], check=True
+        [uv, "tool", "install", "git+https://github.com/tuan3w/hermes-agent@main"],
+        check=True,
     )
 
 
