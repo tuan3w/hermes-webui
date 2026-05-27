@@ -91,11 +91,7 @@ def is_wsl() -> bool:
 
 
 def ensure_supported_platform() -> None:
-    if platform.system() == "Windows" and not is_wsl():
-        raise RuntimeError(
-            "Native Windows is not supported for this bootstrap yet. "
-            "Please run it from Linux, macOS, or inside WSL2."
-        )
+    pass  # Windows, Linux, and macOS are all supported
 
 
 def _agent_dir_from_hermes_cli() -> Path | None:
