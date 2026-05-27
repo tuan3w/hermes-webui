@@ -18,7 +18,20 @@ from pathlib import Path
 
 
 INSTALLER_URL = "https://raw.githubusercontent.com/tuan3w/hermes-agent/main/scripts/install.sh"
-REPO_ROOT = Path(__file__).resolve().parent
+def _win_norm(p: Path) -> Path:
+    r"""Strip the \\?\ extended-length prefix that Path.resolve() can add on Windows.
+
+    That prefix is valid for file I/O but breaks subprocess argument lists and
+    some stdlib tools (ensurepip, pip). Safe no-op on non-Windows.
+    """
+    if platform.system() == "Windows":
+        s = str(p)
+        if s.startswith("\\\\?\\"):
+            return Path(s[4:])
+    return p
+
+
+REPO_ROOT = _win_norm(Path(__file__).resolve().parent)
 
 
 def _load_repo_dotenv() -> None:
@@ -92,10 +105,14 @@ def is_wsl() -> bool:
 
 def ensure_supported_platform() -> None:
     if platform.system() == "Windows" and not is_wsl():
-        raise RuntimeError(
-            "Native Windows is not supported for this bootstrap yet. "
-            "Please run it from Linux, macOS, or inside WSL2."
-        )
+        # Allow Windows when launched by the Tauri desktop app (it manages the
+        # Python venv via uv and sets HERMES_DESKTOP=1).  Bare CLI use on
+        # native Windows is still untested; WSL2 is the recommended shell path.
+        if not os.getenv("HERMES_DESKTOP"):
+            raise RuntimeError(
+                "Native Windows is not supported for this bootstrap yet. "
+                "Please run it from Linux, macOS, or inside WSL2."
+            )
 
 
 def _agent_dir_from_hermes_cli() -> Path | None:
@@ -135,7 +152,7 @@ def _agent_dir_from_hermes_cli() -> Path | None:
         return None
     for parent in interp.parents:
         if (parent / "run_agent.py").exists():
-            return parent.resolve()
+            return _win_norm(parent.resolve())
     return None
 
 
@@ -151,7 +168,7 @@ def discover_agent_dir() -> Path | None:
     for raw in candidates:
         if not raw:
             continue
-        candidate = Path(raw).expanduser().resolve()
+        candidate = _win_norm(Path(raw).expanduser().resolve())
         if candidate.exists() and (candidate / "run_agent.py").exists():
             return candidate
     return _agent_dir_from_hermes_cli()
@@ -173,8 +190,12 @@ def discover_launcher_python(agent_dir: Path | None) -> str:
     return shutil.which("python3") or shutil.which("python") or sys.executable
 
 
-def _python_can_run_webui_and_agent(python_exe: str, agent_dir: Path | None = None) -> bool:
-    script = "import yaml\nfrom run_agent import AIAgent\n"
+def _python_can_run_webui_and_agent(
+    python_exe: str,
+    agent_dir: Path | None = None,
+    require_agent: bool = True,
+) -> bool:
+    script = "import yaml\nfrom run_agent import AIAgent\n" if require_agent else "import yaml\n"
     env = os.environ.copy()
     if agent_dir:
         # PREPEND agent_dir to PYTHONPATH so an `agent_dir/run_agent.py` wins
@@ -196,16 +217,17 @@ def _python_can_run_webui_and_agent(python_exe: str, agent_dir: Path | None = No
     return check.returncode == 0
 
 
-def ensure_python_has_webui_deps(python_exe: str, agent_dir: Path | None = None) -> str:
-    """Return a Python executable that can run both WebUI and Hermes Agent.
+def ensure_python_has_webui_deps(
+    python_exe: str,
+    agent_dir: Path | None = None,
+    require_agent: bool = True,
+) -> str:
+    """Return a Python executable that can run WebUI (and optionally Hermes Agent).
 
-    The WebUI can be launched directly with its local .venv. That venv has the
-    WebUI dependencies (for example PyYAML), but may not have Hermes Agent on its
-    import path. In that case the server starts healthy, then chat fails later
-    with "AIAgent not available". Prefer the agent venv when it is usable, and
-    validate the final interpreter before starting the server.
+    When require_agent is False (desktop/Tauri mode) only WebUI deps are
+    checked; the agent integration is optional and handled separately.
     """
-    if _python_can_run_webui_and_agent(python_exe, agent_dir):
+    if _python_can_run_webui_and_agent(python_exe, agent_dir, require_agent=require_agent):
         return python_exe
 
     agent_candidates: list[Path] = []
@@ -219,34 +241,35 @@ def ensure_python_has_webui_deps(python_exe: str, agent_dir: Path | None = None)
             agent_candidates.append(agent_dir / rel)
         for candidate in agent_candidates:
             if str(candidate) != python_exe and candidate.exists():
-                if _python_can_run_webui_and_agent(str(candidate), agent_dir):
+                if _python_can_run_webui_and_agent(str(candidate), agent_dir, require_agent=require_agent):
                     return str(candidate)
 
     venv_dir = REPO_ROOT / ".venv"
     venv_python = venv_dir / (
         "Scripts/python.exe" if platform.system() == "Windows" else "bin/python"
     )
+    # REPO_ROOT is already normalized via _win_norm(), so venv_dir / venv_python
+    # are clean Win32 paths with no \\?\ prefix.
+    venv_python_str = str(venv_python)
+
     if not venv_python.exists():
         info(f"Creating local virtualenv at {venv_dir}")
-        # symlinks=True: some Python builds (notably mise/asdf shared-library
-        # installs on macOS) default venv to copy mode. The copied binary still
-        # uses @executable_path/../lib/libpython3.X.dylib for its load command,
-        # so the venv binary aborts with SIGABRT on first import because the
-        # dylib never gets copied into .venv/lib. Symlinking the interpreter
-        # keeps @executable_path resolving back to the original install.
-        # CPython's venv falls back to copy mode automatically when symlink
-        # creation fails (e.g. older Windows without SeCreateSymbolicLinkPrivilege),
-        # so this is safe to set unconditionally.
-        venv.EnvBuilder(with_pip=True, symlinks=True).create(venv_dir)
+        # Use symlinks only on non-Windows: Windows requires Developer Mode or
+        # admin rights for symlinks. Without them the python.exe symlink silently
+        # fails, leaving the venv broken (ensurepip has no interpreter to run).
+        # On macOS/Linux, symlinks are preferred so @executable_path stays valid
+        # for shared-library Python builds (mise/asdf).
+        use_symlinks = platform.system() != "Windows"
+        venv.EnvBuilder(with_pip=True, symlinks=use_symlinks).create(venv_dir)
 
     info("Installing WebUI dependencies into local virtualenv")
     subprocess.run(
-        [str(venv_python), "-m", "pip", "install", "--quiet", "--upgrade", "pip"],
+        [venv_python_str, "-m", "pip", "install", "--quiet", "--upgrade", "pip"],
         check=True,
     )
     subprocess.run(
         [
-            str(venv_python),
+            venv_python_str,
             "-m",
             "pip",
             "install",
@@ -256,11 +279,12 @@ def ensure_python_has_webui_deps(python_exe: str, agent_dir: Path | None = None)
         ],
         check=True,
     )
-    if _python_can_run_webui_and_agent(str(venv_python), agent_dir):
-        return str(venv_python)
+    if _python_can_run_webui_and_agent(venv_python_str, agent_dir, require_agent=require_agent):
+        return venv_python_str
     raise RuntimeError(
-        "Python environment cannot import both WebUI dependencies and Hermes Agent. "
-        "Set HERMES_WEBUI_PYTHON to the Hermes Agent venv Python or install the "
+        "Python environment cannot import WebUI dependencies"
+        + (" and Hermes Agent" if require_agent else "")
+        + ". Set HERMES_WEBUI_PYTHON to a suitable interpreter or install the "
         "WebUI requirements into that environment."
     )
 
@@ -436,13 +460,17 @@ def main() -> int:
     agent_dir = discover_agent_dir()
     if not agent_dir and not hermes_command_exists():
         if args.skip_agent_install:
-            raise RuntimeError(
-                "Hermes Agent was not found and auto-install was disabled."
-            )
-        install_hermes_agent()
-        agent_dir = discover_agent_dir()
+            # Desktop (Tauri) mode: agent is optional. The server starts without
+            # it; agent-backed chat will be unavailable until the user installs it.
+            info("Hermes Agent not found — continuing without agent support.")
+        else:
+            install_hermes_agent()
+            agent_dir = discover_agent_dir()
 
-    python_exe = ensure_python_has_webui_deps(discover_launcher_python(agent_dir), agent_dir)
+    require_agent = not args.skip_agent_install
+    python_exe = ensure_python_has_webui_deps(
+        discover_launcher_python(agent_dir), agent_dir, require_agent=require_agent
+    )
     state_dir = Path(
         os.getenv("HERMES_WEBUI_STATE_DIR", str(Path.home() / ".hermes" / "webui"))
     ).expanduser()
