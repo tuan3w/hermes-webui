@@ -17,7 +17,7 @@ import webbrowser
 from pathlib import Path
 
 
-INSTALLER_URL = "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
+INSTALLER_URL = "https://raw.githubusercontent.com/tuan3w/hermes-agent/main/scripts/install.sh"
 REPO_ROOT = Path(__file__).resolve().parent
 
 
