@@ -4851,6 +4851,11 @@ def handle_get(handler, parsed) -> bool:
 
     # ── Gateway Status (GET) ──
     if parsed.path == "/api/gateway/status":
+        from api.config import DESKTOP_MODE
+        if DESKTOP_MODE:
+            # In the desktop bundle there is no gateway daemon; return a
+            # "healthy" stub so the Docker-specific gateway notice is hidden.
+            return j(handler, {"running": True, "configured": True, "platforms": [], "last_active": ""})
         import datetime
         identity_map = _load_gateway_session_identity_map()
         sessions_path = _gateway_session_metadata_path()

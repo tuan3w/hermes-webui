@@ -47,6 +47,9 @@ def _platform_default_hermes_home() -> Path:
 HOST = os.getenv("HERMES_WEBUI_HOST", "127.0.0.1")
 PORT = int(os.getenv("HERMES_WEBUI_PORT", "8787"))
 
+# True when running inside the Tauri desktop bundle (set by Rust via HERMES_DESKTOP=1).
+DESKTOP_MODE: bool = os.getenv("HERMES_DESKTOP", "").strip() == "1"
+
 # ── TLS/HTTPS config (optional, env-overridable) ────────────────────────────
 TLS_CERT = os.getenv("HERMES_WEBUI_TLS_CERT", "").strip() or None
 TLS_KEY = os.getenv("HERMES_WEBUI_TLS_KEY", "").strip() or None
