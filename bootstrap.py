@@ -175,14 +175,16 @@ def discover_agent_dir() -> Path | None:
 
 
 def discover_launcher_python(agent_dir: Path | None) -> str:
-    env_python = os.getenv("HERMES_WEBUI_PYTHON")
-    if env_python:
-        return env_python
+    # Agent Python takes highest priority — it has all agent + webui deps installed.
+    # HERMES_WEBUI_PYTHON (Tauri minimal venv) is a fallback for when no agent is present.
     if agent_dir:
         for rel in ("venv/bin/python", "venv/Scripts/python.exe", ".venv/bin/python", ".venv/Scripts/python.exe"):
             candidate = agent_dir / rel
             if candidate.exists():
                 return str(candidate)
+    env_python = os.getenv("HERMES_WEBUI_PYTHON")
+    if env_python:
+        return env_python
     for rel in (".venv/bin/python", ".venv/Scripts/python.exe"):
         candidate = REPO_ROOT / rel
         if candidate.exists():
